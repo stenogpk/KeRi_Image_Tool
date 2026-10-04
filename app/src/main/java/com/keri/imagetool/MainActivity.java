@@ -3,6 +3,9 @@ package com.keri.imagetool;
 import android.app.Activity;
 import android.content.ContentValues;
 import android.content.Intent;
+import android.database.Cursor;
+import android.provider.OpenableColumns;
+import android.content.ClipData;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
@@ -19,10 +22,21 @@ import android.widget.*;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 import java.text.DecimalFormat;
 
 public class MainActivity extends Activity {
     private static final int PICK_IMAGE = 41;
+    private static final int PICK_BULK = 42;
+    private final ArrayList<Uri> bulkUris = new ArrayList<>();
+    private boolean bulkMode = false;
+    private File compressedZip;
     private Uri selectedUri, savedUri;
     private Bitmap selectedBitmap;
     private TextView fileInfo, resultInfo, previewLabel;
@@ -100,6 +114,10 @@ public class MainActivity extends Activity {
         choose.setTextColor(Color.WHITE); choose.setBackground(shape(purple,14));
         LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(-1,dp(52)); bp.topMargin=dp(14); card.addView(choose,bp);
         choose.setOnClickListener(v -> pickImage());
+        Button chooseBulk = new Button(this); chooseBulk.setText("＋  Choose up to 50 photos (Bulk)");
+        chooseBulk.setAllCaps(false); chooseBulk.setTextColor(purple); chooseBulk.setBackground(shape(Color.rgb(239,238,255),14));
+        LinearLayout.LayoutParams bulkPickParams = new LinearLayout.LayoutParams(-1,dp(48)); bulkPickParams.topMargin=dp(9); card.addView(chooseBulk,bulkPickParams);
+        chooseBulk.setOnClickListener(v -> pickBulkImages());
         fileInfo = text("No image selected",13,Color.GRAY,false); fileInfo.setPadding(0,dp(10),0,0); card.addView(fileInfo);
         LinearLayout targetCard = new LinearLayout(this); targetCard.setOrientation(1); targetCard.setPadding(dp(16),dp(16),dp(16),dp(16)); targetCard.setBackground(shape(Color.WHITE,22));
         LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(-1,-2); tp.topMargin=dp(14); root.addView(targetCard,tp);
@@ -112,13 +130,13 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(dp(95),dp(54)); sp.leftMargin=dp(10); row.addView(unitSpinner,sp);
         compressButton = new Button(this); compressButton.setText("Compress image  →"); compressButton.setAllCaps(false); compressButton.setTextColor(Color.WHITE); compressButton.setTextSize(16); compressButton.setTypeface(null,Typeface.BOLD); compressButton.setBackground(shape(ink,14));
         LinearLayout.LayoutParams cb = new LinearLayout.LayoutParams(-1,dp(54)); cb.topMargin=dp(16); targetCard.addView(compressButton,cb);
-        compressButton.setOnClickListener(v -> compressImage());
+        compressButton.setOnClickListener(v -> { if (bulkMode) compressBulkImages(); else compressImage(); });
         LinearLayout resultCard = new LinearLayout(this); resultCard.setOrientation(1); resultCard.setPadding(dp(16),dp(16),dp(16),dp(16)); resultCard.setBackground(shape(Color.WHITE,22));
         LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(-1,-2); rp.topMargin=dp(14); root.addView(resultCard,rp);
         resultCard.addView(text("YOUR RESULT",12,purple,true));
         resultInfo = text("Your compressed image details will appear here.",14,Color.rgb(103,105,129),false); resultInfo.setPadding(0,dp(10),0,dp(10)); resultCard.addView(resultInfo);
         shareButton = new Button(this); shareButton.setText("Save & share image"); shareButton.setAllCaps(false); shareButton.setTextColor(Color.WHITE); shareButton.setBackground(shape(Color.rgb(16,166,126),14)); shareButton.setEnabled(false); resultCard.addView(shareButton,new LinearLayout.LayoutParams(-1,dp(50)));
-        shareButton.setOnClickListener(v -> saveAndShare());
+        shareButton.setOnClickListener(v -> { if (compressedZip != null) saveAndShareZip(); else saveAndShare(); });
         TextView footer=text("Developed by Shartendu",12,Color.rgb(120,120,145),false); footer.setGravity(Gravity.CENTER); footer.setPadding(0,dp(24),0,dp(4)); root.addView(footer);
         setContentView(scroll);
     }
@@ -127,12 +145,38 @@ public class MainActivity extends Activity {
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT); i.setType("image/*"); i.addCategory(Intent.CATEGORY_OPENABLE);
         startActivityForResult(i,PICK_IMAGE);
     }
+    private void pickBulkImages() {
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT); i.setType("image/*");
+        i.addCategory(Intent.CATEGORY_OPENABLE); i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE,true);
+        startActivityForResult(i,PICK_BULK);
+    }
     @Override protected void onActivityResult(int req,int res,Intent data) {
         super.onActivityResult(req,res,data);
-        if(req==PICK_IMAGE && res==RESULT_OK && data!=null && data.getData()!=null) {
-            selectedUri=data.getData();
+        if(res!=RESULT_OK || data==null) return;
+        if(req==PICK_BULK) {
+            bulkUris.clear();
+            ClipData clip=data.getClipData();
+            if(clip!=null) {
+                int count=Math.min(clip.getItemCount(),50);
+                for(int i=0;i<count;i++) bulkUris.add(clip.getItemAt(i).getUri());
+                if(clip.getItemCount()>50) Toast.makeText(this,"Maximum 50 photos allowed. First 50 selected.",Toast.LENGTH_LONG).show();
+            } else if(data.getData()!=null) bulkUris.add(data.getData());
+            if(bulkUris.isEmpty()) return;
+            bulkMode=true; selectedBitmap=null; selectedUri=null; compressed=null; compressedZip=null;
+            previewImage.setImageDrawable(null); previewImage.setVisibility(View.GONE);
+            previewLabel.setText("✓  Bulk selection ready\n"+bulkUris.size()+" photos selected");
+            previewLabel.setTextColor(purple); previewLabel.setTextSize(15);
+            fileInfo.setText(bulkUris.size()+" photos selected • Bulk ZIP output");
+            compressButton.setText("Compress "+bulkUris.size()+" photos  →");
+            shareButton.setEnabled(false);
+            resultInfo.setText("Ready for bulk compression. Photos will be processed one by one to reduce memory use.");
+            return;
+        }
+        if(req==PICK_IMAGE && data.getData()!=null) {
+            bulkMode=false; bulkUris.clear(); compressedZip=null; selectedUri=data.getData();
+            compressButton.setText("Compress image  →");
             try {
-                getContentResolver().takePersistableUriPermission(selectedUri,Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                try { getContentResolver().takePersistableUriPermission(selectedUri,Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch(Exception ignored) {}
                 InputStream in=getContentResolver().openInputStream(selectedUri); selectedBitmap=BitmapFactory.decodeStream(in); if(in!=null)in.close();
                 if(selectedBitmap==null) throw new Exception("Unsupported image");
                 compressed=null; shareButton.setEnabled(false);
@@ -142,11 +186,9 @@ public class MainActivity extends Activity {
                 Bitmap thumbnail = Bitmap.createScaledBitmap(selectedBitmap,
                     Math.max(1, Math.round(thumbW * thumbScale)),
                     Math.max(1, Math.round(thumbH * thumbScale)), true);
-                previewImage.setImageBitmap(thumbnail);
-                previewImage.setVisibility(View.VISIBLE);
+                previewImage.setImageBitmap(thumbnail); previewImage.setVisibility(View.VISIBLE);
                 previewLabel.setText("✓  Photo selected  •  " + thumbW + " × " + thumbH);
-                previewLabel.setTextColor(purple);
-                previewLabel.setTextSize(13);
+                previewLabel.setTextColor(purple); previewLabel.setTextSize(13);
                 fileInfo.setText("Original size: "+pretty(sizeOfUri(selectedUri)));
                 resultInfo.setText("Ready to compress. Original photo stays untouched.");
             } catch(Exception e) { Toast.makeText(this,"Could not open this image",Toast.LENGTH_LONG).show(); }
@@ -199,10 +241,107 @@ public class MainActivity extends Activity {
         }
         return best;
     }
+    private String getDisplayName(Uri uri) {
+        if(uri==null) return "Image";
+        try(Cursor c=getContentResolver().query(uri,new String[]{OpenableColumns.DISPLAY_NAME},null,null,null)) {
+            if(c!=null && c.moveToFirst()) return c.getString(0);
+        } catch(Exception ignored) {}
+        String last=uri.getLastPathSegment();
+        return last==null ? "Image" : last;
+    }
+    private String makeKeRiJpegName(String original) {
+        if(original==null || original.trim().isEmpty()) original="Image";
+        String base=original; int dot=base.lastIndexOf('.');
+        if(dot>0) base=base.substring(0,dot);
+        if(base.regionMatches(true,0,"KeRi_",0,5)) return base+".jpg";
+        return "KeRi_"+base+".jpg";
+    }
+    private void compressBulkImages() {
+        if(bulkUris.isEmpty()) { Toast.makeText(this,"Choose photos first",Toast.LENGTH_SHORT).show(); return; }
+        final long target;
+        try {
+            double amount=Double.parseDouble(targetInput.getText().toString().trim());
+            if(amount<=0) throw new NumberFormatException();
+            target=Math.max(1024L,(long)(amount*(unitSpinner.getSelectedItemPosition()==0?1024:1048576)));
+        } catch(Exception e) { targetInput.setError("Enter a valid size"); return; }
+        compressButton.setEnabled(false); shareButton.setEnabled(false);
+        compressButton.setText("Preparing ZIP…");
+        final ArrayList<Uri> workList=new ArrayList<>(bulkUris);
+        new Thread(() -> {
+            File zip=null;
+            try {
+                zip=File.createTempFile("keri_bulk_",".zip",getCacheDir());
+                Set<String> usedNames=new HashSet<>();
+                try(ZipOutputStream zos=new ZipOutputStream(new FileOutputStream(zip))) {
+                    for(int index=0;index<workList.size();index++) {
+                        Uri uri=workList.get(index);
+                        Bitmap bitmap=decodeForBulk(uri);
+                        if(bitmap==null) throw new Exception("Cannot decode "+getDisplayName(uri));
+                        byte[] output;
+                        try { output=smartCompress(bitmap,target); } finally { bitmap.recycle(); }
+                        String entryName=uniqueZipName(makeKeRiJpegName(getDisplayName(uri)),usedNames);
+                        zos.putNextEntry(new ZipEntry(entryName)); zos.write(output); zos.closeEntry();
+                        final int done=index+1;
+                        runOnUiThread(() -> compressButton.setText("Compressing "+done+"/"+workList.size()+"…"));
+                    }
+                }
+                final File completedZip=zip;
+                runOnUiThread(() -> {
+                    compressedZip=completedZip; compressed=null;
+                    compressButton.setEnabled(true); compressButton.setText("Compress "+workList.size()+" photos  →");
+                    shareButton.setEnabled(true);
+                    resultInfo.setText("Bulk compression complete\n"+workList.size()+" photos packed into ZIP\nEach image name is prefixed with KeRi_. Ready to save and share.");
+                    Toast.makeText(this,"Bulk ZIP is ready",Toast.LENGTH_LONG).show();
+                });
+            } catch(Exception e) {
+                if(zip!=null) zip.delete();
+                runOnUiThread(() -> {
+                    compressButton.setEnabled(true); compressButton.setText("Compress "+workList.size()+" photos  →");
+                    Toast.makeText(this,"Bulk compression stopped. Try fewer or smaller photos.",Toast.LENGTH_LONG).show();
+                    resultInfo.setText("Bulk compression could not finish. Your original photos are unchanged.");
+                });
+            }
+        }).start();
+    }
+    private Bitmap decodeForBulk(Uri uri) throws Exception {
+        BitmapFactory.Options bounds=new BitmapFactory.Options(); bounds.inJustDecodeBounds=true;
+        try(InputStream in=getContentResolver().openInputStream(uri)) { BitmapFactory.decodeStream(in,null,bounds); }
+        int sample=1; int maxSide=Math.max(bounds.outWidth,bounds.outHeight);
+        while(maxSide/sample>2400) sample*=2;
+        BitmapFactory.Options opts=new BitmapFactory.Options(); opts.inSampleSize=sample; opts.inPreferredConfig=Bitmap.Config.RGB_565;
+        try(InputStream in=getContentResolver().openInputStream(uri)) { return BitmapFactory.decodeStream(in,null,opts); }
+    }
+    private String uniqueZipName(String desired,Set<String> used) {
+        String candidate=desired; int n=2;
+        while(!used.add(candidate.toLowerCase(java.util.Locale.ROOT))) {
+            int dot=desired.lastIndexOf('.');
+            candidate=(dot>0?desired.substring(0,dot):desired)+" ("+(n++)+")"+(dot>0?desired.substring(dot):".jpg");
+        }
+        return candidate;
+    }
+    private void saveAndShareZip() {
+        if(compressedZip==null || !compressedZip.exists()) return;
+        try {
+            String name="KeRi_Bulk_"+System.currentTimeMillis()+".zip";
+            ContentValues values=new ContentValues(); values.put(MediaStore.MediaColumns.DISPLAY_NAME,name);
+            values.put(MediaStore.MediaColumns.MIME_TYPE,"application/zip");
+            if(Build.VERSION.SDK_INT>=29) values.put(MediaStore.MediaColumns.RELATIVE_PATH,"Download");
+            Uri uri=getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI,values);
+            if(uri==null) throw new Exception("Cannot create ZIP");
+            try(InputStream in=new java.io.FileInputStream(compressedZip); OutputStream out=getContentResolver().openOutputStream(uri)) {
+                byte[] buffer=new byte[32768]; int read;
+                while((read=in.read(buffer))!=-1) out.write(buffer,0,read);
+            }
+            Intent share=new Intent(Intent.ACTION_SEND); share.setType("application/zip");
+            share.putExtra(Intent.EXTRA_STREAM,uri); share.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(Intent.createChooser(share,"Share compressed photos ZIP"));
+            Toast.makeText(this,"ZIP saved to Downloads",Toast.LENGTH_LONG).show();
+        } catch(Exception e) { Toast.makeText(this,"Could not save ZIP",Toast.LENGTH_LONG).show(); }
+    }
     private void saveAndShare() {
         if(compressed==null)return;
         try {
-            String name="Keri_"+System.currentTimeMillis()+".jpg";
+            String name=makeKeRiJpegName(getDisplayName(selectedUri));
             ContentValues values=new ContentValues(); values.put(MediaStore.Images.Media.DISPLAY_NAME,name); values.put(MediaStore.Images.Media.MIME_TYPE,"image/jpeg"); values.put(MediaStore.Images.Media.RELATIVE_PATH,"Pictures/Keri Image Tool"); values.put(MediaStore.Images.Media.IS_PENDING,1);
             Uri uri=getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,values);
             if(uri==null)throw new Exception("Save failed");
