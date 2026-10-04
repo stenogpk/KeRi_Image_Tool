@@ -47,10 +47,10 @@ public class MainActivity extends Activity {
         if (bold) t.setTypeface(Typeface.DEFAULT, Typeface.BOLD); return t;
     }
     private void buildUi() {
-        ScrollView scroll = new ScrollView(this); scroll.setFillViewport(true);
+        ScrollView scroll = new ScrollView(this); scroll.setFillViewport(true); scroll.setClipToPadding(false);
         LinearLayout root = new LinearLayout(this); root.setOrientation(1);
         root.setPadding(dp(20), dp(18), dp(20), dp(24));
-        root.setBackgroundColor(Color.rgb(246,247,255)); scroll.addView(root);
+        root.setBackgroundColor(Color.rgb(246,247,255));\n        root.setOnApplyWindowInsetsListener((v, insets) -> {\n            v.setPadding(dp(20), dp(18) + insets.getSystemWindowInsetTop(), dp(20), dp(24) + insets.getSystemWindowInsetBottom());\n            return insets;\n        });\n        scroll.addView(root);
         LinearLayout header = new LinearLayout(this); header.setOrientation(1);
         TextView brand = text("KERI  ✦  IMAGE TOOL", 13, purple, true);
         TextView title = text("Compress images", 29, ink, true); title.setPadding(0,dp(7),0,dp(4));
@@ -103,7 +103,7 @@ public class MainActivity extends Activity {
                 compressed=null; shareButton.setEnabled(false);
                 preview.setText("✓  Photo selected\n"+selectedBitmap.getWidth()+" × "+selectedBitmap.getHeight());
                 preview.setTextColor(purple);
-                fileInfo.setText("Original size: "+sizeOfUri(selectedUri));
+                fileInfo.setText("Original size: "+pretty(sizeOfUri(selectedUri)));
                 resultInfo.setText("Ready to compress. Original photo stays untouched.");
             } catch(Exception e) { Toast.makeText(this,"Could not open this image",Toast.LENGTH_LONG).show(); }
         }
