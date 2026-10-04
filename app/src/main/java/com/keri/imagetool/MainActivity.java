@@ -48,6 +48,8 @@ public class MainActivity extends Activity {
     private TextView resizeInfo;
     private Button resizeActionButton, resizeSaveButton;
     private boolean updatingResizeFields=false;
+    private int lastResizeUnit=0;
+    private double lastResizeDpi=300;
     private byte[] resizedJpeg;
     private Uri selectedUri, savedUri;
     private Bitmap selectedBitmap;
@@ -177,7 +179,7 @@ public class MainActivity extends Activity {
         saveResizedButton.setOnClickListener(v -> saveResizedImage());
         resizeUnitSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
             @Override public void onNothingSelected(android.widget.AdapterView<?> parent) {}
-            @Override public void onItemSelected(android.widget.AdapterView<?> parent,View view,int position,long id) { refreshResizeDimensionFields(); }
+            @Override public void onItemSelected(android.widget.AdapterView<?> parent,View view,int position,long id) { convertResizeUnit(position); }
         });
         android.text.TextWatcher widthWatcher=new android.text.TextWatcher() {
             @Override public void beforeTextChanged(CharSequence x,int st,int count,int after) {}
@@ -197,7 +199,7 @@ public class MainActivity extends Activity {
         maintainRatio.setOnCheckedChangeListener((buttonView,isChecked) -> { if(isChecked) updatePairedDimension(true); });
         resizeDpiInput.addTextChangedListener(new android.text.TextWatcher() {
             @Override public void beforeTextChanged(CharSequence x,int st,int count,int after) {}
-            @Override public void onTextChanged(CharSequence x,int st,int before,int count) { if(resizeOriginalWidth>0) refreshResizeDimensionFields(); }
+            @Override public void onTextChanged(CharSequence x,int st,int before,int count) { if(resizeOriginalWidth>0) convertResizeDpi(); }
             @Override public void afterTextChanged(android.text.Editable e) {}
         });
         TextView footer=text("Developed by Shartendu",12,Color.rgb(120,120,145),false); footer.setGravity(Gravity.CENTER); footer.setPadding(0,dp(24),0,dp(4)); root.addView(footer);
@@ -221,7 +223,7 @@ public class MainActivity extends Activity {
         super.onActivityResult(req,res,data);
         if(res!=RESULT_OK || data==null) return;
         if(req==PICK_RESIZE && data.getData()!=null) {
-            resizeUri=data.getData(); resizedJpeg=null; if(resizedBitmap!=null){resizedBitmap.recycle();resizedBitmap=null;}
+            resizeUri=data.getData(); resizedJpeg=null; if(resizedBitmap!=null && resizedBitmap!=resizeSourceBitmap){resizedBitmap.recycle();resizedBitmap=null;} if(resizeSourceBitmap!=null){resizeSourceBitmap.recycle();resizeSourceBitmap=null;}
             try {
                 try { getContentResolver().takePersistableUriPermission(resizeUri,Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch(Exception ignored) {}
                 BitmapFactory.Options bounds=new BitmapFactory.Options(); bounds.inJustDecodeBounds=true;
@@ -234,7 +236,7 @@ public class MainActivity extends Activity {
                 if(resizeSourceBitmap==null) throw new Exception("Cannot decode image");
                 resizePreview.setImageBitmap(resizeSourceBitmap); resizePreview.setVisibility(View.VISIBLE);
                 resizeInfo.setText("Original: "+resizeOriginalWidth+" × "+resizeOriginalHeight+" px  •  "+pretty(sizeOfUri(resizeUri)));
-                updatingResizeFields=true; resizeUnitSpinner.setSelection(0); resizeWidthInput.setText(String.valueOf(resizeOriginalWidth)); resizeHeightInput.setText(String.valueOf(resizeOriginalHeight)); updatingResizeFields=false;
+                updatingResizeFields=true; resizeUnitSpinner.setSelection(0); lastResizeUnit=0; lastResizeDpi=currentDpi(); resizeWidthInput.setText(String.valueOf(resizeOriginalWidth)); resizeHeightInput.setText(String.valueOf(resizeOriginalHeight)); updatingResizeFields=false;
                 resizeSaveButton.setEnabled(false);
             } catch(Exception e) { resizeInfo.setText("Could not open this image. Please choose another photo."); Toast.makeText(this,"Could not open image",Toast.LENGTH_LONG).show(); }
             return;
@@ -298,12 +300,37 @@ public class MainActivity extends Activity {
         if(unit==2) return px*2.54/currentDpi();
         return px;
     }
-    private void refreshResizeDimensionFields() {
-        if(resizeOriginalWidth<=0||resizeOriginalHeight<=0||resizeWidthInput==null)return;
-        updatingResizeFields=true;
-        resizeWidthInput.setText(formatDimension(fromPixels(resizeOriginalWidth)));
-        resizeHeightInput.setText(formatDimension(fromPixels(resizeOriginalHeight)));
-        updatingResizeFields=false;
+    private double pixelsForUnit(double value,int unit,double dpi) {
+        if(unit==1) return value*dpi;
+        if(unit==2) return value*dpi/2.54;
+        return value;
+    }
+    private void convertResizeUnit(int newUnit) {
+        if(resizeWidthInput==null)return;
+        if(resizeOriginalWidth<=0) { lastResizeUnit=newUnit; lastResizeDpi=currentDpi(); return; }
+        try {
+            double w=Double.parseDouble(resizeWidthInput.getText().toString().trim());
+            double h=Double.parseDouble(resizeHeightInput.getText().toString().trim());
+            double wPx=pixelsForUnit(w,lastResizeUnit,lastResizeDpi), hPx=pixelsForUnit(h,lastResizeUnit,lastResizeDpi);
+            updatingResizeFields=true;
+            resizeWidthInput.setText(formatDimension(fromPixels(wPx)));
+            resizeHeightInput.setText(formatDimension(fromPixels(hPx)));
+            lastResizeUnit=newUnit; lastResizeDpi=currentDpi();
+        } catch(Exception ignored) { lastResizeUnit=newUnit; lastResizeDpi=currentDpi(); }
+        finally { updatingResizeFields=false; }
+    }
+    private void convertResizeDpi() {
+        if(resizeWidthInput==null || lastResizeUnit==0) { lastResizeDpi=currentDpi(); return; }
+        try {
+            double w=Double.parseDouble(resizeWidthInput.getText().toString().trim());
+            double h=Double.parseDouble(resizeHeightInput.getText().toString().trim());
+            double wPx=pixelsForUnit(w,lastResizeUnit,lastResizeDpi), hPx=pixelsForUnit(h,lastResizeUnit,lastResizeDpi);
+            lastResizeDpi=currentDpi();
+            updatingResizeFields=true;
+            resizeWidthInput.setText(formatDimension(fromPixels(wPx)));
+            resizeHeightInput.setText(formatDimension(fromPixels(hPx)));
+        } catch(Exception ignored) { lastResizeDpi=currentDpi(); }
+        finally { updatingResizeFields=false; }
     }
     private String formatDimension(double value) { return resizeUnitSpinner.getSelectedItemPosition()==0?String.valueOf(Math.round(value)):fmt.format(value); }
     private void updatePairedDimension(boolean widthChanged) {
