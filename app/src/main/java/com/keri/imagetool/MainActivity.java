@@ -51,7 +51,12 @@ public class MainActivity extends Activity {
         ScrollView scroll = new ScrollView(this); scroll.setFillViewport(true); scroll.setClipToPadding(false);
         LinearLayout root = new LinearLayout(this); root.setOrientation(1);
         root.setPadding(dp(20), dp(18), dp(20), dp(24));
-        root.setBackgroundColor(Color.rgb(246,247,255));\n        root.setOnApplyWindowInsetsListener((v, insets) -> {\n            v.setPadding(dp(20), dp(18) + insets.getSystemWindowInsetTop(), dp(20), dp(24) + insets.getSystemWindowInsetBottom());\n            return insets;\n        });\n        scroll.addView(root);
+        root.setBackgroundColor(Color.rgb(246,247,255));
+        root.setOnApplyWindowInsetsListener((v, insets) -> {
+            v.setPadding(dp(20), dp(18) + insets.getSystemWindowInsetTop(), dp(20), dp(24) + insets.getSystemWindowInsetBottom());
+            return insets;
+        });
+        scroll.addView(root);
         LinearLayout header = new LinearLayout(this); header.setOrientation(1);
         TextView brand = text("KERI  ✦  IMAGE TOOL", 13, purple, true);
         TextView title = text("Compress images", 29, ink, true); title.setPadding(0,dp(7),0,dp(4));
