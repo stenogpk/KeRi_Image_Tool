@@ -34,9 +34,21 @@ import java.text.DecimalFormat;
 public class MainActivity extends Activity {
     private static final int PICK_IMAGE = 41;
     private static final int PICK_BULK = 42;
+    private static final int PICK_RESIZE = 43;
     private final ArrayList<Uri> bulkUris = new ArrayList<>();
     private boolean bulkMode = false;
     private File compressedZip;
+    private Uri resizeUri;
+    private Bitmap resizeSourceBitmap, resizedBitmap;
+    private int resizeOriginalWidth, resizeOriginalHeight;
+    private EditText resizeWidthInput, resizeHeightInput, resizeDpiInput;
+    private Spinner resizeUnitSpinner;
+    private CheckBox maintainRatio;
+    private ImageView resizePreview;
+    private TextView resizeInfo;
+    private Button resizeActionButton, resizeSaveButton;
+    private boolean updatingResizeFields=false;
+    private byte[] resizedJpeg;
     private Uri selectedUri, savedUri;
     private Bitmap selectedBitmap;
     private TextView fileInfo, resultInfo, previewLabel;
@@ -137,6 +149,57 @@ public class MainActivity extends Activity {
         resultInfo = text("Your compressed image details will appear here.",14,Color.rgb(103,105,129),false); resultInfo.setPadding(0,dp(10),0,dp(10)); resultCard.addView(resultInfo);
         shareButton = new Button(this); shareButton.setText("Save & share image"); shareButton.setAllCaps(false); shareButton.setTextColor(Color.WHITE); shareButton.setBackground(shape(Color.rgb(16,166,126),14)); shareButton.setEnabled(false); resultCard.addView(shareButton,new LinearLayout.LayoutParams(-1,dp(50)));
         shareButton.setOnClickListener(v -> { if (compressedZip != null) saveAndShareZip(); else saveAndShare(); });
+        LinearLayout resizeCard = new LinearLayout(this); resizeCard.setOrientation(1); resizeCard.setPadding(dp(16),dp(16),dp(16),dp(16)); resizeCard.setBackground(shape(Color.WHITE,22));
+        LinearLayout.LayoutParams resizeCardParams = new LinearLayout.LayoutParams(-1,-2); resizeCardParams.topMargin=dp(14); root.addView(resizeCard,resizeCardParams);
+        resizeCard.addView(text("IMAGE RESIZER",12,purple,true));
+        TextView resizeHint=text("Change image dimensions in pixels or physical units.",13,Color.rgb(103,105,129),false); resizeHint.setPadding(0,dp(5),0,dp(12)); resizeCard.addView(resizeHint);
+        Button resizeChooseButton=new Button(this); resizeChooseButton.setText("＋  Choose image to resize"); resizeChooseButton.setAllCaps(false); resizeChooseButton.setTextColor(Color.WHITE); resizeChooseButton.setBackground(shape(purple,14)); resizeCard.addView(resizeChooseButton,new LinearLayout.LayoutParams(-1,dp(48)));
+        resizeChooseButton.setOnClickListener(v -> pickResizeImage());
+        resizePreview=new ImageView(this); resizePreview.setScaleType(ImageView.ScaleType.FIT_CENTER); resizePreview.setVisibility(View.GONE);
+        LinearLayout.LayoutParams resizePreviewParams=new LinearLayout.LayoutParams(-1,dp(150)); resizePreviewParams.topMargin=dp(10); resizeCard.addView(resizePreview,resizePreviewParams);
+        resizeInfo=text("No image selected",12,Color.GRAY,false); resizeInfo.setPadding(0,dp(8),0,dp(10)); resizeCard.addView(resizeInfo);
+        LinearLayout resizeUnitRow=new LinearLayout(this); resizeUnitRow.setGravity(Gravity.CENTER_VERTICAL); resizeCard.addView(resizeUnitRow);
+        resizeUnitSpinner=new Spinner(this); ArrayAdapter<String> resizeUnitsAdapter=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"Pixels (px)","Inches (in)","Centimeters (cm)"}); resizeUnitSpinner.setAdapter(resizeUnitsAdapter);
+        resizeUnitRow.addView(resizeUnitSpinner,new LinearLayout.LayoutParams(0,dp(48),1));
+        resizeDpiInput=new EditText(this); resizeDpiInput.setSingleLine(true); resizeDpiInput.setText("300"); resizeDpiInput.setTextSize(15); resizeDpiInput.setInputType(2); resizeDpiInput.setHint("DPI"); resizeDpiInput.setTextColor(ink); resizeDpiInput.setBackground(shape(Color.rgb(246,247,255),10));
+        LinearLayout.LayoutParams dpiParams=new LinearLayout.LayoutParams(dp(92),dp(48)); dpiParams.leftMargin=dp(8); resizeUnitRow.addView(resizeDpiInput,dpiParams);
+        TextView dpiHint=text("DPI used for inch/cm conversion",11,Color.GRAY,false); dpiHint.setPadding(0,dp(3),0,dp(8)); resizeCard.addView(dpiHint);
+        LinearLayout dimensionsRow=new LinearLayout(this); dimensionsRow.setGravity(Gravity.CENTER_VERTICAL); resizeCard.addView(dimensionsRow);
+        resizeWidthInput=dimensionInput("Width"); resizeHeightInput=dimensionInput("Height");
+        dimensionsRow.addView(resizeWidthInput,new LinearLayout.LayoutParams(0,dp(52),1));
+        TextView times=text("  ×  ",15,Color.GRAY,true); dimensionsRow.addView(times);
+        dimensionsRow.addView(resizeHeightInput,new LinearLayout.LayoutParams(0,dp(52),1));
+        maintainRatio=new CheckBox(this); maintainRatio.setText("Maintain aspect ratio"); maintainRatio.setTextColor(ink); maintainRatio.setTextSize(14); maintainRatio.setChecked(true); maintainRatio.setPadding(0,dp(8),0,dp(8)); resizeCard.addView(maintainRatio);
+        resizeActionButton=new Button(this); resizeActionButton.setText("Resize image  →"); resizeActionButton.setAllCaps(false); resizeActionButton.setTextColor(Color.WHITE); resizeActionButton.setTypeface(null,Typeface.BOLD); resizeActionButton.setBackground(shape(ink,14)); resizeCard.addView(resizeActionButton,new LinearLayout.LayoutParams(-1,dp(52)));
+        resizeActionButton.setOnClickListener(v -> resizeSelectedImage());
+        Button saveResizedButton=new Button(this); saveResizedButton.setText("Save resized image"); saveResizedButton.setAllCaps(false); saveResizedButton.setTextColor(Color.WHITE); saveResizedButton.setBackground(shape(Color.rgb(16,166,126),14)); saveResizedButton.setEnabled(false); resizeCard.addView(saveResizedButton,new LinearLayout.LayoutParams(-1,dp(48)));
+        resizeSaveButton=saveResizedButton;
+        saveResizedButton.setOnClickListener(v -> saveResizedImage());
+        resizeUnitSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override public void onNothingSelected(android.widget.AdapterView<?> parent) {}
+            @Override public void onItemSelected(android.widget.AdapterView<?> parent,View view,int position,long id) { refreshResizeDimensionFields(); }
+        });
+        android.text.TextWatcher widthWatcher=new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence x,int st,int count,int after) {}
+            @Override public void onTextChanged(CharSequence x,int st,int before,int count) {
+                if(!updatingResizeFields && maintainRatio.isChecked() && resizeOriginalWidth>0 && resizeOriginalHeight>0) updatePairedDimension(true);
+            }
+            @Override public void afterTextChanged(android.text.Editable e) {}
+        };
+        android.text.TextWatcher heightWatcher=new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence x,int st,int count,int after) {}
+            @Override public void onTextChanged(CharSequence x,int st,int before,int count) {
+                if(!updatingResizeFields && maintainRatio.isChecked() && resizeOriginalWidth>0 && resizeOriginalHeight>0) updatePairedDimension(false);
+            }
+            @Override public void afterTextChanged(android.text.Editable e) {}
+        };
+        resizeWidthInput.addTextChangedListener(widthWatcher); resizeHeightInput.addTextChangedListener(heightWatcher);
+        maintainRatio.setOnCheckedChangeListener((buttonView,isChecked) -> { if(isChecked) updatePairedDimension(true); });
+        resizeDpiInput.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence x,int st,int count,int after) {}
+            @Override public void onTextChanged(CharSequence x,int st,int before,int count) { if(resizeOriginalWidth>0) refreshResizeDimensionFields(); }
+            @Override public void afterTextChanged(android.text.Editable e) {}
+        });
         TextView footer=text("Developed by Shartendu",12,Color.rgb(120,120,145),false); footer.setGravity(Gravity.CENTER); footer.setPadding(0,dp(24),0,dp(4)); root.addView(footer);
         setContentView(scroll);
     }
@@ -144,6 +207,10 @@ public class MainActivity extends Activity {
     private void pickImage() {
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT); i.setType("image/*"); i.addCategory(Intent.CATEGORY_OPENABLE);
         startActivityForResult(i,PICK_IMAGE);
+    }
+    private void pickResizeImage() {
+        Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT); i.setType("image/*"); i.addCategory(Intent.CATEGORY_OPENABLE);
+        startActivityForResult(i,PICK_RESIZE);
     }
     private void pickBulkImages() {
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT); i.setType("image/*");
@@ -153,6 +220,25 @@ public class MainActivity extends Activity {
     @Override protected void onActivityResult(int req,int res,Intent data) {
         super.onActivityResult(req,res,data);
         if(res!=RESULT_OK || data==null) return;
+        if(req==PICK_RESIZE && data.getData()!=null) {
+            resizeUri=data.getData(); resizedJpeg=null; if(resizedBitmap!=null){resizedBitmap.recycle();resizedBitmap=null;}
+            try {
+                try { getContentResolver().takePersistableUriPermission(resizeUri,Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch(Exception ignored) {}
+                BitmapFactory.Options bounds=new BitmapFactory.Options(); bounds.inJustDecodeBounds=true;
+                try(InputStream in=getContentResolver().openInputStream(resizeUri)){BitmapFactory.decodeStream(in,null,bounds);}
+                if(bounds.outWidth<=0 || bounds.outHeight<=0) throw new Exception("Unsupported image");
+                resizeOriginalWidth=bounds.outWidth; resizeOriginalHeight=bounds.outHeight;
+                int sample=1; while(Math.max(bounds.outWidth,bounds.outHeight)/sample>1200) sample*=2;
+                BitmapFactory.Options opts=new BitmapFactory.Options(); opts.inSampleSize=sample; opts.inPreferredConfig=Bitmap.Config.RGB_565;
+                try(InputStream in=getContentResolver().openInputStream(resizeUri)){resizeSourceBitmap=BitmapFactory.decodeStream(in,null,opts);}
+                if(resizeSourceBitmap==null) throw new Exception("Cannot decode image");
+                resizePreview.setImageBitmap(resizeSourceBitmap); resizePreview.setVisibility(View.VISIBLE);
+                resizeInfo.setText("Original: "+resizeOriginalWidth+" × "+resizeOriginalHeight+" px  •  "+pretty(sizeOfUri(resizeUri)));
+                updatingResizeFields=true; resizeUnitSpinner.setSelection(0); resizeWidthInput.setText(String.valueOf(resizeOriginalWidth)); resizeHeightInput.setText(String.valueOf(resizeOriginalHeight)); updatingResizeFields=false;
+                resizeSaveButton.setEnabled(false);
+            } catch(Exception e) { resizeInfo.setText("Could not open this image. Please choose another photo."); Toast.makeText(this,"Could not open image",Toast.LENGTH_LONG).show(); }
+            return;
+        }
         if(req==PICK_BULK) {
             bulkUris.clear();
             ClipData clip=data.getClipData();
@@ -193,6 +279,91 @@ public class MainActivity extends Activity {
                 resultInfo.setText("Ready to compress. Original photo stays untouched.");
             } catch(Exception e) { Toast.makeText(this,"Could not open this image",Toast.LENGTH_LONG).show(); }
         }
+    }
+    private Button saveResizedButtonRef() { return resizeSaveButton; }
+    private Button resizeSaveButton;
+    private EditText dimensionInput(String hint) {
+        EditText input=new EditText(this); input.setSingleLine(true); input.setTextSize(20); input.setInputType(8194); input.setHint(hint); input.setTextColor(ink); input.setPadding(dp(12),0,dp(12),0); input.setBackground(shape(Color.rgb(246,247,255),10)); return input;
+    }
+    private double currentDpi() { try { double d=Double.parseDouble(resizeDpiInput.getText().toString().trim()); return d>0&&d<=2400?d:300; } catch(Exception e){return 300;} }
+    private double toPixels(double value) {
+        int unit=resizeUnitSpinner.getSelectedItemPosition();
+        if(unit==1) return value*currentDpi();
+        if(unit==2) return value*currentDpi()/2.54;
+        return value;
+    }
+    private double fromPixels(double px) {
+        int unit=resizeUnitSpinner.getSelectedItemPosition();
+        if(unit==1) return px/currentDpi();
+        if(unit==2) return px*2.54/currentDpi();
+        return px;
+    }
+    private void refreshResizeDimensionFields() {
+        if(resizeOriginalWidth<=0||resizeOriginalHeight<=0||resizeWidthInput==null)return;
+        updatingResizeFields=true;
+        resizeWidthInput.setText(formatDimension(fromPixels(resizeOriginalWidth)));
+        resizeHeightInput.setText(formatDimension(fromPixels(resizeOriginalHeight)));
+        updatingResizeFields=false;
+    }
+    private String formatDimension(double value) { return resizeUnitSpinner.getSelectedItemPosition()==0?String.valueOf(Math.round(value)):fmt.format(value); }
+    private void updatePairedDimension(boolean widthChanged) {
+        try {
+            EditText source=widthChanged?resizeWidthInput:resizeHeightInput;
+            double entered=Double.parseDouble(source.getText().toString().trim());
+            double px=toPixels(entered);
+            if(px<=0)return;
+            double paired=widthChanged?px*resizeOriginalHeight/resizeOriginalWidth:px*resizeOriginalWidth/resizeOriginalHeight;
+            updatingResizeFields=true;
+            (widthChanged?resizeHeightInput:resizeWidthInput).setText(formatDimension(fromPixels(paired)));
+            updatingResizeFields=false;
+        } catch(Exception ignored) { updatingResizeFields=false; }
+    }
+    private void resizeSelectedImage() {
+        if(resizeUri==null){Toast.makeText(this,"Choose an image first",Toast.LENGTH_SHORT).show();return;}
+        final int targetW,targetH;
+        try {
+            double w=toPixels(Double.parseDouble(resizeWidthInput.getText().toString().trim()));
+            double h=toPixels(Double.parseDouble(resizeHeightInput.getText().toString().trim()));
+            if(w<1||h<1||w>12000||h>12000) throw new IllegalArgumentException();
+            targetW=(int)Math.round(w); targetH=(int)Math.round(h);
+        } catch(Exception e){resizeWidthInput.setError("Enter valid dimensions (1–12000)");return;}
+        resizeActionButton.setEnabled(false); resizeActionButton.setText("Resizing…"); resizeSaveButton.setEnabled(false);
+        new Thread(() -> {
+            Bitmap output=null;
+            try {
+                BitmapFactory.Options bounds=new BitmapFactory.Options(); bounds.inJustDecodeBounds=true;
+                try(InputStream in=getContentResolver().openInputStream(resizeUri)){BitmapFactory.decodeStream(in,null,bounds);}
+                int sample=1; int maxTarget=Math.max(targetW,targetH);
+                while(Math.max(bounds.outWidth,bounds.outHeight)/(sample*2)>=maxTarget*1.5 && sample<32) sample*=2;
+                BitmapFactory.Options opts=new BitmapFactory.Options(); opts.inSampleSize=sample; opts.inPreferredConfig=Bitmap.Config.RGB_565;
+                Bitmap source;
+                try(InputStream in=getContentResolver().openInputStream(resizeUri)){source=BitmapFactory.decodeStream(in,null,opts);}
+                if(source==null) throw new Exception("Image decode failed");
+                output=Bitmap.createScaledBitmap(source,targetW,targetH,true); if(output!=source)source.recycle();
+                ByteArrayOutputStream stream=new ByteArrayOutputStream(); output.compress(Bitmap.CompressFormat.JPEG,95,stream); byte[] bytes=stream.toByteArray();
+                Bitmap finalOutput=output;
+                runOnUiThread(() -> {
+                    if(resizedBitmap!=null && resizedBitmap!=resizeSourceBitmap)resizedBitmap.recycle();
+                    resizedBitmap=finalOutput; resizedJpeg=bytes; resizePreview.setImageBitmap(finalOutput);
+                    resizeInfo.setText("Resized: "+targetW+" × "+targetH+" px  •  "+pretty(bytes.length)+"  •  JPEG");
+                    resizeActionButton.setEnabled(true); resizeActionButton.setText("Resize image  →"); resizeSaveButton.setEnabled(true);
+                });
+            } catch(Exception e) {
+                if(output!=null && !output.isRecycled())output.recycle();
+                runOnUiThread(() -> {resizeActionButton.setEnabled(true);resizeActionButton.setText("Resize image  →");Toast.makeText(this,"Resize failed. Try smaller dimensions.",Toast.LENGTH_LONG).show();});
+            }
+        }).start();
+    }
+    private void saveResizedImage() {
+        if(resizedJpeg==null)return;
+        try {
+            String name=makeKeRiJpegName(getDisplayName(resizeUri));
+            ContentValues values=new ContentValues(); values.put(MediaStore.Images.Media.DISPLAY_NAME,name); values.put(MediaStore.Images.Media.MIME_TYPE,"image/jpeg"); values.put(MediaStore.Images.Media.RELATIVE_PATH,"Pictures/Keri Image Tool"); values.put(MediaStore.Images.Media.IS_PENDING,1);
+            Uri uri=getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,values); if(uri==null)throw new Exception("Save failed");
+            try(OutputStream out=getContentResolver().openOutputStream(uri)){out.write(resizedJpeg);}
+            values.clear(); values.put(MediaStore.Images.Media.IS_PENDING,0);getContentResolver().update(uri,values,null,null);
+            Toast.makeText(this,"Resized image saved to Pictures/Keri Image Tool",Toast.LENGTH_LONG).show();
+        } catch(Exception e){Toast.makeText(this,"Could not save resized image",Toast.LENGTH_LONG).show();}
     }
     private long sizeOfUri(Uri uri) {
         try(android.database.Cursor c=getContentResolver().query(uri,new String[]{android.provider.OpenableColumns.SIZE},null,null,null)) {
