@@ -199,13 +199,27 @@ public class MainActivity extends Activity {
             if(c!=null && c.moveToFirst()) return c.getLong(0);
         } catch(Exception ignored){} return 0;
     }
-    private String pretty(long n) { return n<1024 ? n+" B" : n<1048576 ? fmt.format(n/1024.0)+" KB" : fmt.format(n/1048576.0)+" MB"; }
+    private String pretty(long n) { return n<1000 ? n+" B" : n<1000000 ? fmt.format(n/1000.0)+" KB" : fmt.format(n/1000000.0)+" MB"; }
+    // Leave a full display-unit safety margin so file managers cannot round the result above the requested limit.
+    private long safeTargetBytes(String raw,int unitPosition) {
+        double amount=Double.parseDouble(raw.trim());
+        if(Double.isNaN(amount)||Double.isInfinite(amount)||amount<=0) throw new IllegalArgumentException("Enter a valid target size");
+        double bytes;
+        if(unitPosition==0) {
+            if(amount<=1.0) throw new IllegalArgumentException("For a guaranteed result, enter more than 1 KB");
+            bytes=Math.floor((amount-1.0)*1000.0);
+        } else {
+            if(amount<=0.001) throw new IllegalArgumentException("Enter a larger target size");
+            bytes=Math.floor((amount-0.001)*1000000.0);
+        }
+        if(bytes<1024.0) throw new IllegalArgumentException("Target is too small to guarantee a valid JPEG. Increase the size.");
+        if(bytes>Long.MAX_VALUE) throw new IllegalArgumentException("Target size is too large");
+        return (long)bytes;
+    }
     private void compressImage() {
         if(selectedBitmap==null) { Toast.makeText(this,"Choose a photo first",Toast.LENGTH_SHORT).show(); return; }
         try {
-            double amount=Double.parseDouble(targetInput.getText().toString().trim());
-            if(amount<=0) throw new NumberFormatException();
-            final long target=Math.max(1024L,(long)(amount*(unitSpinner.getSelectedItemPosition()==0?1024:1048576)));
+            final long target=safeTargetBytes(targetInput.getText().toString(),unitSpinner.getSelectedItemPosition());
             compressButton.setEnabled(false); compressButton.setText("Compressing…");
             new Thread(() -> {
                 try {
@@ -213,8 +227,7 @@ public class MainActivity extends Activity {
                     runOnUiThread(() -> {
                         compressed=out; compressButton.setEnabled(true); compressButton.setText("Compress image  →"); shareButton.setEnabled(true);
                         long actual=out.length; double pct=100.0*actual/target;
-                        resultInfo.setText("Compressed size: "+pretty(actual)+"\nTarget: "+pretty(target)+"  •  "+fmt.format(pct)+"% of target\nQuality-first smart compression. Original remains unchanged.");
-                        if(actual>target) Toast.makeText(this,"Closest achievable size for this image",Toast.LENGTH_LONG).show();
+                        resultInfo.setText("Compressed size: "+pretty(actual)+"\nMaximum allowed: "+pretty(target)+"  •  "+fmt.format(pct)+"% of limit\nStrict size limit met. Best available quality within the limit. Original remains unchanged.");
                     });
                 } catch(Exception e) { runOnUiThread(() -> { compressButton.setEnabled(true); compressButton.setText("Compress image  →"); Toast.makeText(this,"Compression failed. Try another photo.",Toast.LENGTH_LONG).show(); }); }
             }).start();
@@ -224,23 +237,37 @@ public class MainActivity extends Activity {
         ByteArrayOutputStream out=new ByteArrayOutputStream(); b.compress(Bitmap.CompressFormat.JPEG,quality,out); return out.toByteArray();
     }
     private byte[] smartCompress(Bitmap source,long target) {
-        Bitmap working=source; boolean scaled=false; byte[] best=encode(working,35);
-        for(int pass=0;pass<14;pass++) {
-            int lo=35,hi=100; byte[] passBest=null;
-            while(lo<=hi) {
-                int mid=(lo+hi)/2; byte[] candidate=encode(working,mid);
-                if(candidate.length<=target) { passBest=candidate; lo=mid+1; }
-                else hi=mid-1;
+        Bitmap working=source;
+        try {
+            // Preserve original dimensions first; reduce resolution only when quality 1 cannot fit.
+            for(int pass=0;pass<48;pass++) {
+                int lo=1,hi=100;
+                byte[] bestWithinLimit=null;
+                while(lo<=hi) {
+                    int mid=(lo+hi)/2;
+                    byte[] candidate=encode(working,mid);
+                    if(candidate.length<=target) {
+                        bestWithinLimit=candidate;
+                        lo=mid+1;
+                    } else {
+                        hi=mid-1;
+                    }
+                }
+                if(bestWithinLimit!=null && bestWithinLimit.length<=target) return bestWithinLimit;
+                int width=working.getWidth(),height=working.getHeight();
+                if(width<=32 || height<=32) break;
+                int nextWidth=Math.max(1,Math.round(width*0.85f));
+                int nextHeight=Math.max(1,Math.round(height*0.85f));
+                if(nextWidth>=width) nextWidth=width-1;
+                if(nextHeight>=height) nextHeight=height-1;
+                Bitmap smaller=Bitmap.createScaledBitmap(working,nextWidth,nextHeight,true);
+                if(working!=source) working.recycle();
+                working=smaller;
             }
-            if(passBest!=null) { if(working!=source) working.recycle(); return passBest; }
-            byte[] low=encode(working,35); if(low.length<best.length || pass==0) best=low;
-            if(working.getWidth()<500 || working.getHeight()<500) break;
-            int nw=Math.max(1,(int)(working.getWidth()*0.90)); int nh=Math.max(1,(int)(working.getHeight()*0.90));
-            Bitmap smaller=Bitmap.createScaledBitmap(working,nw,nh,true);
-            if(working!=source) working.recycle(); working=smaller; scaled=true;
+            throw new IllegalArgumentException("This photo cannot be reduced below the strict size limit. Increase the target size.");
+        } finally {
+            if(working!=source && !working.isRecycled()) working.recycle();
         }
-        if(working!=source) working.recycle();
-        return best;
     }
     private String getDisplayName(Uri uri) {
         if(uri==null) return "Image";
@@ -261,9 +288,7 @@ public class MainActivity extends Activity {
         if(bulkUris.isEmpty()) { Toast.makeText(this,"Choose photos first",Toast.LENGTH_SHORT).show(); return; }
         final long target;
         try {
-            double amount=Double.parseDouble(targetInput.getText().toString().trim());
-            if(amount<=0) throw new NumberFormatException();
-            target=Math.max(1024L,(long)(amount*(unitSpinner.getSelectedItemPosition()==0?1024:1048576)));
+            target=safeTargetBytes(targetInput.getText().toString(),unitSpinner.getSelectedItemPosition());
         } catch(Exception e) { targetInput.setError("Enter a valid size"); return; }
         compressButton.setEnabled(false); shareButton.setEnabled(false);
         compressButton.setText("Preparing ZIP…");
@@ -291,7 +316,7 @@ public class MainActivity extends Activity {
                     compressedZip=completedZip; compressed=null;
                     compressButton.setEnabled(true); compressButton.setText("Compress "+workList.size()+" photos  →");
                     shareButton.setEnabled(true);
-                    resultInfo.setText("Bulk compression complete\n"+workList.size()+" photos packed into ZIP\nEach image name is prefixed with KeRi_. Ready to save and share.");
+                    resultInfo.setText("Bulk compression complete\n"+workList.size()+" photos packed into ZIP\nMaximum per photo: "+pretty(target)+"\nEvery photo passed the strict size limit. Names are prefixed with KeRi_.");
                     Toast.makeText(this,"Bulk ZIP is ready",Toast.LENGTH_LONG).show();
                 });
             } catch(Exception e) {
