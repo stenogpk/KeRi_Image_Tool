@@ -282,8 +282,6 @@ public class MainActivity extends Activity {
             } catch(Exception e) { Toast.makeText(this,"Could not open this image",Toast.LENGTH_LONG).show(); }
         }
     }
-    private Button saveResizedButtonRef() { return resizeSaveButton; }
-    private Button resizeSaveButton;
     private EditText dimensionInput(String hint) {
         EditText input=new EditText(this); input.setSingleLine(true); input.setTextSize(20); input.setInputType(8194); input.setHint(hint); input.setTextColor(ink); input.setPadding(dp(12),0,dp(12),0); input.setBackground(shape(Color.rgb(246,247,255),10)); return input;
     }
