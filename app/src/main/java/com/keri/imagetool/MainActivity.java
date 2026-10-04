@@ -10,6 +10,8 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Build;
+import android.view.WindowInsets;
 import android.provider.MediaStore;
 import android.view.Gravity;
 import android.view.View;
@@ -35,8 +37,17 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        getWindow().setStatusBarColor(ink);
-        getWindow().setNavigationBarColor(ink);
+        if (Build.VERSION.SDK_INT >= 21) {
+            getWindow().setStatusBarColor(Color.TRANSPARENT);
+            getWindow().setNavigationBarColor(Color.TRANSPARENT);
+            getWindow().getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                | View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+            );
+        }
         buildUi();
     }
 
@@ -53,8 +64,17 @@ public class MainActivity extends Activity {
         LinearLayout root = new LinearLayout(this); root.setOrientation(1);
         root.setPadding(dp(20), dp(18), dp(20), dp(24));
         root.setBackgroundColor(Color.rgb(246,247,255));
-        root.setOnApplyWindowInsetsListener((v, insets) -> {
-            v.setPadding(dp(20), dp(18) + insets.getSystemWindowInsetTop(), dp(20), dp(24) + insets.getSystemWindowInsetBottom());
+        scroll.setOnApplyWindowInsetsListener((v, insets) -> {
+            int topInset = 0, bottomInset = 0;
+            if (Build.VERSION.SDK_INT >= 30) {
+                android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+                topInset = bars.top;
+                bottomInset = bars.bottom;
+            } else {
+                topInset = insets.getSystemWindowInsetTop();
+                bottomInset = insets.getSystemWindowInsetBottom();
+            }
+            v.setPadding(0, topInset, 0, bottomInset);
             return insets;
         });
         scroll.addView(root);
