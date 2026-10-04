@@ -158,11 +158,11 @@ public class MainActivity extends Activity {
             ClipData clip=data.getClipData();
             if(clip!=null) {
                 int count=Math.min(clip.getItemCount(),50);
-                for(int i=0;i<count;i++) bulkUris.add(clip.getItemAt(i).getUri());
+                for(int i=0;i<count;i++) { Uri itemUri=clip.getItemAt(i).getUri(); bulkUris.add(itemUri); try { getContentResolver().takePersistableUriPermission(itemUri,Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch(Exception ignored) {} }
                 if(clip.getItemCount()>50) Toast.makeText(this,"Maximum 50 photos allowed. First 50 selected.",Toast.LENGTH_LONG).show();
             } else if(data.getData()!=null) bulkUris.add(data.getData());
             if(bulkUris.isEmpty()) return;
-            bulkMode=true; selectedBitmap=null; selectedUri=null; compressed=null; compressedZip=null;
+            bulkMode=true; if(selectedBitmap!=null){selectedBitmap.recycle();selectedBitmap=null;} selectedUri=null; compressed=null; compressedZip=null;
             previewImage.setImageDrawable(null); previewImage.setVisibility(View.GONE);
             previewLabel.setText("✓  Bulk selection ready\n"+bulkUris.size()+" photos selected");
             previewLabel.setTextColor(purple); previewLabel.setTextSize(15);
@@ -173,7 +173,7 @@ public class MainActivity extends Activity {
             return;
         }
         if(req==PICK_IMAGE && data.getData()!=null) {
-            bulkMode=false; bulkUris.clear(); compressedZip=null; selectedUri=data.getData();
+            bulkMode=false; bulkUris.clear(); compressedZip=null; if(selectedBitmap!=null){selectedBitmap.recycle();selectedBitmap=null;} selectedUri=data.getData();
             compressButton.setText("Compress image  →");
             try {
                 try { getContentResolver().takePersistableUriPermission(selectedUri,Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch(Exception ignored) {}
@@ -232,13 +232,14 @@ public class MainActivity extends Activity {
                 if(candidate.length<=target) { passBest=candidate; lo=mid+1; }
                 else hi=mid-1;
             }
-            if(passBest!=null) return passBest;
+            if(passBest!=null) { if(working!=source) working.recycle(); return passBest; }
             byte[] low=encode(working,35); if(low.length<best.length || pass==0) best=low;
             if(working.getWidth()<500 || working.getHeight()<500) break;
             int nw=Math.max(1,(int)(working.getWidth()*0.90)); int nh=Math.max(1,(int)(working.getHeight()*0.90));
             Bitmap smaller=Bitmap.createScaledBitmap(working,nw,nh,true);
             if(working!=source) working.recycle(); working=smaller; scaled=true;
         }
+        if(working!=source) working.recycle();
         return best;
     }
     private String getDisplayName(Uri uri) {
