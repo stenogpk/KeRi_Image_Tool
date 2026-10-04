@@ -125,8 +125,7 @@ public class MainActivity extends Activity {
         try {
             double amount=Double.parseDouble(targetInput.getText().toString().trim());
             if(amount<=0) throw new NumberFormatException();
-            long target=(long)(amount*(unitSpinner.getSelectedItemPosition()==0?1024:1048576));
-            if(target<1024) target=1024;
+            final long target=Math.max(1024L,(long)(amount*(unitSpinner.getSelectedItemPosition()==0?1024:1048576)));
             compressButton.setEnabled(false); compressButton.setText("Compressing…");
             new Thread(() -> {
                 try {
