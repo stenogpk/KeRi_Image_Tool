@@ -23,7 +23,8 @@ public class MainActivity extends Activity {
     private static final int PICK_IMAGE = 41;
     private Uri selectedUri, savedUri;
     private Bitmap selectedBitmap;
-    private TextView fileInfo, resultInfo, preview;
+    private TextView fileInfo, resultInfo, previewLabel;
+    private ImageView previewImage;
     private EditText targetInput;
     private Spinner unitSpinner;
     private Button compressButton, shareButton;
@@ -64,9 +65,17 @@ public class MainActivity extends Activity {
         header.addView(brand); header.addView(title); header.addView(sub); root.addView(header);
         LinearLayout card = new LinearLayout(this); card.setOrientation(1); card.setPadding(dp(16),dp(16),dp(16),dp(16));
         card.setBackground(shape(Color.WHITE,22)); LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-1,-2); cp.topMargin=dp(22); root.addView(card,cp);
-        preview = text("✦\n\nChoose a photo to get started",16,Color.rgb(130,130,155),true);
-        preview.setGravity(Gravity.CENTER); preview.setBackground(shape(Color.rgb(242,241,255),16));
-        LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(-1,dp(210)); card.addView(preview,pp);
+        LinearLayout previewBox = new LinearLayout(this); previewBox.setOrientation(1);
+        previewBox.setGravity(Gravity.CENTER); previewBox.setPadding(dp(12),dp(10),dp(12),dp(10));
+        previewBox.setBackground(shape(Color.rgb(242,241,255),16));
+        LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(-1,dp(210)); card.addView(previewBox,pp);
+        previewImage = new ImageView(this); previewImage.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        previewImage.setVisibility(View.GONE);
+        previewBox.addView(previewImage,new LinearLayout.LayoutParams(dp(132),dp(132)));
+        previewLabel = text("✦\\nChoose a photo to get started",16,Color.rgb(130,130,155),true);
+        previewLabel.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(-1,-2); plp.topMargin=dp(4);
+        previewBox.addView(previewLabel,plp);
         Button choose = new Button(this); choose.setText("＋  Choose photo"); choose.setAllCaps(false);
         choose.setTextColor(Color.WHITE); choose.setBackground(shape(purple,14));
         LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(-1,dp(52)); bp.topMargin=dp(14); card.addView(choose,bp);
@@ -107,8 +116,17 @@ public class MainActivity extends Activity {
                 InputStream in=getContentResolver().openInputStream(selectedUri); selectedBitmap=BitmapFactory.decodeStream(in); if(in!=null)in.close();
                 if(selectedBitmap==null) throw new Exception("Unsupported image");
                 compressed=null; shareButton.setEnabled(false);
-                preview.setText("✓  Photo selected\n"+selectedBitmap.getWidth()+" × "+selectedBitmap.getHeight());
-                preview.setTextColor(purple);
+                int thumbW = selectedBitmap.getWidth();
+                int thumbH = selectedBitmap.getHeight();
+                float thumbScale = Math.min(1f, 360f / Math.max(thumbW, thumbH));
+                Bitmap thumbnail = Bitmap.createScaledBitmap(selectedBitmap,
+                    Math.max(1, Math.round(thumbW * thumbScale)),
+                    Math.max(1, Math.round(thumbH * thumbScale)), true);
+                previewImage.setImageBitmap(thumbnail);
+                previewImage.setVisibility(View.VISIBLE);
+                previewLabel.setText("✓  Photo selected  •  " + thumbW + " × " + thumbH);
+                previewLabel.setTextColor(purple);
+                previewLabel.setTextSize(13);
                 fileInfo.setText("Original size: "+pretty(sizeOfUri(selectedUri)));
                 resultInfo.setText("Ready to compress. Original photo stays untouched.");
             } catch(Exception e) { Toast.makeText(this,"Could not open this image",Toast.LENGTH_LONG).show(); }
